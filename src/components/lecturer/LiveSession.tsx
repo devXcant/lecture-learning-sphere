@@ -1,28 +1,252 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/components/ui/use-toast";
-import { Mic, MicOff, User } from "lucide-react";
+import { Mic, MicOff, User, Users, Play, Pause, Volume2, VolumeX } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from '@/context/AuthContext';
 
 const LiveSession: React.FC = () => {
+  const { user, userDetails } = useAuth();
   const [isLive, setIsLive] = useState(false);
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const [sessionTitle, setSessionTitle] = useState('');
   const [sessionDescription, setSessionDescription] = useState('');
   const [selectedCourse, setSelectedCourse] = useState('');
   const [liveTime, setLiveTime] = useState(0);
   const [participants, setParticipants] = useState<string[]>([]);
   const [isMuted, setIsMuted] = useState(false);
+  const [courses, setCourses] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   
-  // Mock data
-  const courses = [
-    { id: 1, title: 'Introduction to Programming' },
-    { id: 2, title: 'Data Structures' },
-  ];
+  // WebRTC related state
+  const [peerConnections, setPeerConnections] = useState<Map<string, RTCPeerConnection>>(new Map());
+  const [isListening, setIsListening] = useState(false);
+  const [audioEnabled, setAudioEnabled] = useState(true);
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const webSocketRef = useRef<WebSocket | null>(null);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
 
-  const startLiveSession = () => {
+  // Effect to fetch courses
+  useEffect(() => {
+    const fetchCourses = async () => {
+      if (!user) return;
+      
+      try {
+        const { data, error } = await supabase
+          .from('courses')
+          .select('id, title')
+          .eq('lecturer_id', user.id);
+        
+        if (error) throw error;
+        
+        setCourses(data || []);
+      } catch (error) {
+        console.error('Error fetching courses:', error);
+        toast({
+          variant: "destructive",
+          title: "Error",
+          description: "Failed to load your courses",
+        });
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    fetchCourses();
+  }, [user]);
+
+  // Cleanup effect
+  useEffect(() => {
+    return () => {
+      // Cleanup WebRTC resources
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(track => track.stop());
+      }
+      
+      // Cleanup WebSocket connection
+      if (webSocketRef.current) {
+        webSocketRef.current.close();
+      }
+      
+      // Cleanup timer
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+      
+      // If live session is still active, end it
+      if (isLive && sessionId) {
+        endLiveSession(true);
+      }
+    };
+  }, [isLive, sessionId]);
+
+  // Setup WebRTC for broadcasting
+  const setupWebRTC = async () => {
+    try {
+      // Get local audio stream
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      localStreamRef.current = stream;
+      
+      // Initialize WebSocket connection to signaling server
+      const wsUrl = `wss://blnjgaizfqdojvqemjwm.functions.supabase.co/webrtc-signaling`;
+      const ws = new WebSocket(wsUrl);
+      webSocketRef.current = ws;
+      
+      ws.onopen = () => {
+        console.log('WebSocket connection established');
+        // Send join message as broadcaster
+        if (sessionId) {
+          ws.send(JSON.stringify({
+            type: 'join',
+            roomId: sessionId,
+            userId: user?.id,
+            isBroadcaster: true
+          }));
+        }
+      };
+      
+      ws.onmessage = async (event) => {
+        const message = JSON.parse(event.data);
+        
+        switch (message.type) {
+          case 'user-joined':
+            // New listener joined, create a peer connection
+            handleNewParticipant(message.userId, message.userName);
+            break;
+          
+          case 'offer':
+            // We don't need to handle offers as broadcaster
+            break;
+          
+          case 'answer':
+            // Remote peer has answered our offer
+            const pc = peerConnections.get(message.userId);
+            if (pc) {
+              await pc.setRemoteDescription(new RTCSessionDescription(message.payload));
+            }
+            break;
+          
+          case 'ice-candidate':
+            // Add ICE candidate to the peer connection
+            const connection = peerConnections.get(message.userId);
+            if (connection) {
+              await connection.addIceCandidate(new RTCIceCandidate(message.payload));
+            }
+            break;
+          
+          case 'user-left':
+            // Remove participant
+            handleParticipantLeft(message.userId);
+            break;
+            
+          case 'participants-list':
+            // Update participants list
+            setParticipants(message.participants.map((p: any) => p.name));
+            break;
+        }
+      };
+      
+      ws.onerror = (error) => {
+        console.error('WebSocket error:', error);
+        toast({
+          variant: "destructive",
+          title: "Connection Error",
+          description: "There was an error connecting to the session server.",
+        });
+      };
+      
+      ws.onclose = () => {
+        console.log('WebSocket connection closed');
+      };
+      
+    } catch (error) {
+      console.error('Error setting up WebRTC:', error);
+      toast({
+        variant: "destructive",
+        title: "Setup Error",
+        description: "Could not access your microphone. Please ensure it's connected and permissions are granted.",
+      });
+      
+      // End the session if can't set up WebRTC
+      if (isLive) {
+        endLiveSession();
+      }
+    }
+  };
+
+  const handleNewParticipant = async (userId: string, userName: string) => {
+    if (!localStreamRef.current) return;
+    
+    try {
+      // Create new peer connection
+      const pc = new RTCPeerConnection({
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' }
+        ]
+      });
+      
+      // Add all tracks from local stream
+      localStreamRef.current.getTracks().forEach(track => {
+        if (localStreamRef.current) {
+          pc.addTrack(track, localStreamRef.current);
+        }
+      });
+      
+      // Handle ICE candidates
+      pc.onicecandidate = (event) => {
+        if (event.candidate && webSocketRef.current) {
+          webSocketRef.current.send(JSON.stringify({
+            type: 'ice-candidate',
+            roomId: sessionId,
+            userId: userId,
+            payload: event.candidate
+          }));
+        }
+      };
+      
+      // Create and send offer
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      
+      if (webSocketRef.current) {
+        webSocketRef.current.send(JSON.stringify({
+          type: 'offer',
+          roomId: sessionId,
+          userId: userId,
+          payload: offer
+        }));
+      }
+      
+      // Add to peer connections map
+      setPeerConnections(prev => new Map(prev).set(userId, pc));
+      
+      // Update participants list
+      setParticipants(prev => [...prev, userName]);
+      
+    } catch (error) {
+      console.error('Error handling new participant:', error);
+    }
+  };
+
+  const handleParticipantLeft = (userId: string) => {
+    // Close the peer connection
+    const pc = peerConnections.get(userId);
+    if (pc) {
+      pc.close();
+      const newPeerConnections = new Map(peerConnections);
+      newPeerConnections.delete(userId);
+      setPeerConnections(newPeerConnections);
+    }
+    
+    // Update participants (this is a simplification)
+    setParticipants(prev => prev.filter(p => p !== userId));
+  };
+
+  const startLiveSession = async () => {
     if (!sessionTitle || !selectedCourse) {
       toast({
         title: "Missing Information",
@@ -32,48 +256,120 @@ const LiveSession: React.FC = () => {
       return;
     }
     
-    setIsLive(true);
-    setLiveTime(0);
-    // Simulate some students joining
-    setParticipants([
-      'Jane Doe',
-      'John Smith',
-      'Maria Garcia',
-    ]);
-    
-    // In a real app, this would set up WebRTC or similar for audio streaming
-    
-    // Simulate sending notifications to students
-    toast({
-      title: "Live Session Started",
-      description: "Notifications sent to all enrolled students.",
-    });
-    
-    // Start a timer to track session duration
-    setInterval(() => {
-      setLiveTime(prevTime => prevTime + 1);
-    }, 1000);
+    try {
+      // Create live session record in the database
+      const { data, error } = await supabase
+        .from('live_sessions')
+        .insert({
+          title: sessionTitle,
+          description: sessionDescription || null,
+          course_id: selectedCourse,
+          lecturer_id: user!.id,
+          is_active: true,
+          start_time: new Date().toISOString()
+        })
+        .select()
+        .single();
+      
+      if (error) throw error;
+      
+      setSessionId(data.id);
+      setIsLive(true);
+      setLiveTime(0);
+      
+      // Start WebRTC for broadcasting
+      await setupWebRTC();
+      
+      // Start timer to track session duration
+      timerRef.current = setInterval(() => {
+        setLiveTime(prevTime => prevTime + 1);
+      }, 1000);
+      
+      toast({
+        title: "Live Session Started",
+        description: "Your live audio session has begun.",
+      });
+      
+    } catch (error) {
+      console.error('Error starting live session:', error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to start the live session.",
+      });
+    }
   };
 
-  const endLiveSession = () => {
-    setIsLive(false);
-    setParticipants([]);
-    
-    // In a real app, this would close the WebRTC connections
-    
-    toast({
-      title: "Live Session Ended",
-      description: `Your session lasted ${formatTime(liveTime)}.`,
-    });
+  const endLiveSession = async (isCleanup = false) => {
+    try {
+      // Stop all audio tracks
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(track => track.stop());
+      }
+      
+      // Close WebSocket connection
+      if (webSocketRef.current) {
+        webSocketRef.current.close();
+      }
+      
+      // Close all peer connections
+      peerConnections.forEach(pc => pc.close());
+      setPeerConnections(new Map());
+      
+      // Clear the timer
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+      
+      // Update the session record in the database
+      if (sessionId) {
+        const { error } = await supabase
+          .from('live_sessions')
+          .update({
+            is_active: false,
+            end_time: new Date().toISOString()
+          })
+          .eq('id', sessionId);
+        
+        if (error && !isCleanup) throw error;
+      }
+      
+      setIsLive(false);
+      setSessionId(null);
+      setParticipants([]);
+      
+      if (!isCleanup) {
+        toast({
+          title: "Live Session Ended",
+          description: `Your session lasted ${formatTime(liveTime)}.`,
+        });
+      }
+    } catch (error) {
+      console.error('Error ending live session:', error);
+      if (!isCleanup) {
+        toast({
+          variant: "destructive",
+          title: "Error",
+          description: "There was an error ending the session.",
+        });
+      }
+    }
   };
 
   const toggleMute = () => {
-    setIsMuted(!isMuted);
-    
-    toast({
-      title: isMuted ? "Microphone Unmuted" : "Microphone Muted",
-      description: isMuted ? "Students can now hear you again." : "Students cannot hear you.",
-    });
+    if (localStreamRef.current) {
+      localStreamRef.current.getAudioTracks().forEach(track => {
+        track.enabled = isMuted;
+      });
+      
+      setIsMuted(!isMuted);
+      
+      toast({
+        title: isMuted ? "Microphone Unmuted" : "Microphone Muted",
+        description: isMuted ? "Students can now hear you again." : "Students cannot hear you.",
+      });
+    }
   };
 
   const formatTime = (seconds: number) => {
@@ -100,6 +396,7 @@ const LiveSession: React.FC = () => {
                   className="w-full p-2 border rounded-md"
                   value={selectedCourse}
                   onChange={(e) => setSelectedCourse(e.target.value)}
+                  disabled={isLoading}
                 >
                   <option value="">Select a course...</option>
                   {courses.map(course => (
@@ -130,7 +427,7 @@ const LiveSession: React.FC = () => {
               
               <Button 
                 onClick={startLiveSession} 
-                disabled={!sessionTitle || !selectedCourse}
+                disabled={!sessionTitle || !selectedCourse || isLoading}
                 className="w-full"
               >
                 <Mic className="mr-2 h-4 w-4" />
@@ -155,7 +452,7 @@ const LiveSession: React.FC = () => {
                     {isMuted ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
                     {isMuted ? 'Unmute' : 'Mute'}
                   </Button>
-                  <Button variant="destructive" onClick={endLiveSession}>
+                  <Button variant="destructive" onClick={() => endLiveSession()}>
                     End Session
                   </Button>
                 </div>
@@ -199,12 +496,18 @@ const LiveSession: React.FC = () => {
                     Participants ({participants.length})
                   </h3>
                   <div className="bg-white p-4 rounded-md shadow-sm h-[200px] overflow-y-auto">
-                    {participants.map((name, index) => (
-                      <div key={index} className="flex items-center py-2 border-b last:border-0">
-                        <User className="h-4 w-4 mr-2" />
-                        <span>{name}</span>
+                    {participants.length === 0 ? (
+                      <div className="text-center text-gray-500 py-4">
+                        No participants yet
                       </div>
-                    ))}
+                    ) : (
+                      participants.map((name, index) => (
+                        <div key={index} className="flex items-center py-2 border-b last:border-0">
+                          <User className="h-4 w-4 mr-2" />
+                          <span>{name}</span>
+                        </div>
+                      ))
+                    )}
                   </div>
                 </div>
               </div>
