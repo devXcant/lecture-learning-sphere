@@ -11,6 +11,7 @@ import { toast } from "@/components/ui/use-toast";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { supabase } from "@/integrations/supabase/client";
 import { useNavigate } from "react-router-dom";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 // Define form schemas
 const signInSchema = z.object({
@@ -195,37 +196,39 @@ const Auth = () => {
       // Test accounts data
       const testUsers = [
         {
-          email: 'admin@test.com',
+          email: 'admin@example.com',
           password: 'password123',
           name: 'Admin Test',
           userType: 'admin',
         },
         {
-          email: 'lecturer@test.com',
+          email: 'lecturer@example.com',
           password: 'password123',
           name: 'Lecturer Test',
           userType: 'lecturer',
           department: 'Computer Science'
         },
         {
-          email: 'student@test.com',
+          email: 'student@example.com',
           password: 'password123',
           name: 'Student Test',
           userType: 'student',
         }
       ];
       
+      let createdUsers = 0;
+      let errorsFound = false;
+      
       // Create each test account
       for (const user of testUsers) {
-        // First check if user already exists
-        const { data: existingUser } = await supabase.auth.admin.listUsers({
-          filter: {
-            email: user.email
-          }
-        });
+        // Clean up any existing auth state before each operation
+        cleanupAuthState();
         
-        // Skip if user already exists
-        if (existingUser && existingUser.length > 0) continue;
+        try {
+          await supabase.auth.signOut({ scope: 'global' });
+        } catch (err) {
+          console.error("Error during global sign out:", err);
+        }
         
         // Create auth user
         const { data: authData, error: authError } = await supabase.auth.signUp({
@@ -240,14 +243,21 @@ const Auth = () => {
           },
         });
         
-        if (authError) throw authError;
+        if (authError) {
+          console.error(`Error creating ${user.userType} test account:`, authError);
+          errorsFound = true;
+          continue;
+        }
         
-        if (!authData.user) continue;
+        if (!authData.user) {
+          console.error(`Failed to create ${user.userType} test account`);
+          continue;
+        }
         
         // Insert into the appropriate table
         const tableName = `${user.userType}_users` as 'admin_users' | 'lecturer_users' | 'student_users';
         
-        await supabase
+        const { error: profileError } = await supabase
           .from(tableName)
           .insert({
             id: authData.user.id,
@@ -255,18 +265,34 @@ const Auth = () => {
             email: user.email,
             ...(user.userType === 'lecturer' ? { department: user.department } : {}),
           });
+        
+        if (profileError) {
+          console.error(`Error creating ${user.userType} profile:`, profileError);
+          errorsFound = true;
+          continue;
+        }
+        
+        createdUsers++;
       }
       
-      toast({
-        title: "Test Accounts Created",
-        description: "Test accounts have been created. You can now sign in with them.",
-      });
-      
-      // Pre-fill the form with admin credentials
-      signInForm.reset({
-        email: 'admin@test.com',
-        password: 'password123',
-      });
+      if (createdUsers > 0) {
+        toast({
+          title: "Test Accounts Created",
+          description: `Created ${createdUsers} test accounts. You can now sign in with them.`,
+        });
+        
+        // Pre-fill the form with admin credentials
+        signInForm.reset({
+          email: 'admin@example.com',
+          password: 'password123',
+        });
+      } else {
+        toast({
+          variant: "destructive",
+          title: "Error",
+          description: "Failed to create test accounts. Check console for details.",
+        });
+      }
       
     } catch (error: any) {
       console.error("Error creating test accounts:", error);
@@ -395,14 +421,19 @@ const Auth = () => {
                       <FormItem>
                         <FormLabel>User Type</FormLabel>
                         <FormControl>
-                          <select 
-                            className="w-full p-2 border rounded-md"
-                            {...field}
+                          <Select 
+                            onValueChange={field.onChange} 
+                            defaultValue={field.value}
                           >
-                            <option value="student">Student</option>
-                            <option value="lecturer">Lecturer</option>
-                            <option value="admin">Admin</option>
-                          </select>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select user type" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="student">Student</SelectItem>
+                              <SelectItem value="lecturer">Lecturer</SelectItem>
+                              <SelectItem value="admin">Admin</SelectItem>
+                            </SelectContent>
+                          </Select>
                         </FormControl>
                         <FormMessage />
                       </FormItem>

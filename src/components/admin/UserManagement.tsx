@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -37,30 +38,37 @@ const UserManagement: React.FC<UserManagementProps> = ({ userType }) => {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   
-  const handleAddUser = (user: Omit<User, 'id'>) => {
-    const newUser = {
-      ...user,
-      id: users.length + 1,
+  const handleAddUser = (userData: UserFormData) => {
+    const newUser: User = {
+      ...userData,
+      id: (users.length + 1).toString(),
     };
     setUsers([...users, newUser]);
     toast({
       title: `${userType === 'student' ? 'Student' : 'Lecturer'} Added`,
-      description: `${user.name} has been successfully added.`,
+      description: `${userData.name} has been successfully added.`,
     });
     setIsAddDialogOpen(false);
   };
   
-  const handleEditUser = (updatedUser: User) => {
-    setUsers(users.map(user => (user.id === updatedUser.id ? updatedUser : user)));
+  const handleEditUser = (updatedUserData: UserFormData) => {
+    if (!currentUser) return;
+    
+    const updatedUser: User = {
+      ...currentUser,
+      ...updatedUserData
+    };
+    
+    setUsers(users.map(user => (user.id === currentUser.id ? updatedUser : user)));
     toast({
       title: `${userType === 'student' ? 'Student' : 'Lecturer'} Updated`,
-      description: `${updatedUser.name} has been successfully updated.`,
+      description: `${updatedUserData.name} has been successfully updated.`,
     });
     setIsEditDialogOpen(false);
     setCurrentUser(null);
   };
   
-  const handleDeleteUser = (id: number) => {
+  const handleDeleteUser = (id: string) => {
     setUsers(users.filter(user => user.id !== id));
     toast({
       title: `${userType === 'student' ? 'Student' : 'Lecturer'} Deleted`,
@@ -117,62 +125,31 @@ const UserManagement: React.FC<UserManagementProps> = ({ userType }) => {
         </TableBody>
       </Table>
 
-      {/* These would be actual implementation of dialogs with the UserFormDialog component */}
-      {isAddDialogOpen && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <Card className="w-[500px]">
-            <CardContent className="p-6">
-              <h2 className="text-xl font-bold mb-4">Add {userType === 'student' ? 'Student' : 'Lecturer'}</h2>
-              <div className="space-y-4">
-                <Input placeholder="Name" />
-                <Input placeholder="Email" type="email" />
-                <Input placeholder={userType === 'student' ? 'Student ID' : 'Department'} />
-                <div className="flex justify-end space-x-2">
-                  <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>Cancel</Button>
-                  <Button onClick={() => {
-                    // This would actually save the form data
-                    handleAddUser({
-                      name: 'New User',
-                      email: 'new@example.com',
-                      [userType === 'student' ? 'enrolledCourses' : 'department']: userType === 'student' ? 0 : 'Department'
-                    });
-                  }}>Save</Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
+      <UserFormDialog 
+        isOpen={isAddDialogOpen}
+        onClose={() => setIsAddDialogOpen(false)}
+        onSubmit={handleAddUser}
+        title={`Add ${userType === 'student' ? 'Student' : 'Lecturer'}`}
+        userType={userType}
+      />
 
       {isEditDialogOpen && currentUser && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <Card className="w-[500px]">
-            <CardContent className="p-6">
-              <h2 className="text-xl font-bold mb-4">Edit {userType === 'student' ? 'Student' : 'Lecturer'}</h2>
-              <div className="space-y-4">
-                <Input placeholder="Name" defaultValue={currentUser.name} />
-                <Input placeholder="Email" type="email" defaultValue={currentUser.email} />
-                <Input 
-                  placeholder={userType === 'student' ? 'Student ID' : 'Department'} 
-                  defaultValue={userType === 'student' ? currentUser.enrolledCourses : currentUser.department} 
-                />
-                <div className="flex justify-end space-x-2">
-                  <Button variant="outline" onClick={() => {
-                    setIsEditDialogOpen(false);
-                    setCurrentUser(null);
-                  }}>Cancel</Button>
-                  <Button onClick={() => {
-                    // This would actually save the form data
-                    handleEditUser({
-                      ...currentUser,
-                      name: currentUser.name + ' (Edited)',
-                    });
-                  }}>Save</Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+        <UserFormDialog 
+          isOpen={isEditDialogOpen}
+          onClose={() => {
+            setIsEditDialogOpen(false);
+            setCurrentUser(null);
+          }}
+          onSubmit={handleEditUser}
+          title={`Edit ${userType === 'student' ? 'Student' : 'Lecturer'}`}
+          initialData={{
+            name: currentUser.name,
+            email: currentUser.email,
+            department: userType === 'lecturer' ? currentUser.department : undefined,
+            enrolledCourses: userType === 'student' ? currentUser.enrolledCourses : undefined,
+          }}
+          userType={userType}
+        />
       )}
     </div>
   );
