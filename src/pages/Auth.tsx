@@ -144,19 +144,26 @@ const Auth = () => {
       // Then store the additional data in the appropriate table
       const tableName = `${data.userType}_users`;
       
-      const { error: profileError } = await supabase
-        .from(tableName)
-        .insert({
-          id: authData.user.id,
-          name: data.name,
-          email: data.email,
-          ...(data.userType === 'lecturer' ? { department: data.department } : {}),
-        });
+      // Fix the issue with table name by using a type-safe approach
+      if (
+        tableName === 'admin_users' || 
+        tableName === 'lecturer_users' || 
+        tableName === 'student_users'
+      ) {
+        const { error: profileError } = await supabase
+          .from(tableName)
+          .insert({
+            id: authData.user.id,
+            name: data.name,
+            email: data.email,
+            ...(data.userType === 'lecturer' ? { department: data.department } : {}),
+          });
 
-      if (profileError) {
-        // If profile creation fails, attempt to clean up the auth user
-        console.error("Error creating profile, cleaning up auth user");
-        throw profileError;
+        if (profileError) {
+          // If profile creation fails, attempt to clean up the auth user
+          console.error("Error creating profile, cleaning up auth user");
+          throw profileError;
+        }
       }
       
       toast({
@@ -174,6 +181,99 @@ const Auth = () => {
         variant: "destructive",
         title: "Error signing up",
         description: error.message || "Please try again",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Create test accounts
+  const createTestAccounts = async () => {
+    try {
+      setLoading(true);
+      
+      // Test accounts data
+      const testUsers = [
+        {
+          email: 'admin@test.com',
+          password: 'password123',
+          name: 'Admin Test',
+          userType: 'admin',
+        },
+        {
+          email: 'lecturer@test.com',
+          password: 'password123',
+          name: 'Lecturer Test',
+          userType: 'lecturer',
+          department: 'Computer Science'
+        },
+        {
+          email: 'student@test.com',
+          password: 'password123',
+          name: 'Student Test',
+          userType: 'student',
+        }
+      ];
+      
+      // Create each test account
+      for (const user of testUsers) {
+        // First check if user already exists
+        const { data: existingUser } = await supabase.auth.admin.listUsers({
+          filter: {
+            email: user.email
+          }
+        });
+        
+        // Skip if user already exists
+        if (existingUser && existingUser.length > 0) continue;
+        
+        // Create auth user
+        const { data: authData, error: authError } = await supabase.auth.signUp({
+          email: user.email,
+          password: user.password,
+          options: {
+            data: {
+              name: user.name,
+              user_type: user.userType,
+              ...(user.department ? { department: user.department } : {}),
+            },
+          },
+        });
+        
+        if (authError) throw authError;
+        
+        if (!authData.user) continue;
+        
+        // Insert into the appropriate table
+        const tableName = `${user.userType}_users` as 'admin_users' | 'lecturer_users' | 'student_users';
+        
+        await supabase
+          .from(tableName)
+          .insert({
+            id: authData.user.id,
+            name: user.name,
+            email: user.email,
+            ...(user.userType === 'lecturer' ? { department: user.department } : {}),
+          });
+      }
+      
+      toast({
+        title: "Test Accounts Created",
+        description: "Test accounts have been created. You can now sign in with them.",
+      });
+      
+      // Pre-fill the form with admin credentials
+      signInForm.reset({
+        email: 'admin@test.com',
+        password: 'password123',
+      });
+      
+    } catch (error: any) {
+      console.error("Error creating test accounts:", error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: error.message || "Failed to create test accounts",
       });
     } finally {
       setLoading(false);
@@ -231,6 +331,16 @@ const Auth = () => {
                   </Button>
                 </form>
               </Form>
+              
+              <div className="mt-4 text-center">
+                <Button 
+                  variant="link" 
+                  onClick={createTestAccounts}
+                  disabled={loading}
+                >
+                  Create Test Accounts
+                </Button>
+              </div>
             </TabsContent>
             
             <TabsContent value="signup">

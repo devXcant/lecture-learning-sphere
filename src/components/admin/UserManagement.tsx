@@ -1,17 +1,18 @@
-
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "@/components/ui/use-toast";
+import { supabase } from "@/integrations/supabase/client";
 import UserFormDialog from './UserFormDialog';
+import type { UserFormData } from './UserFormDialog';
 
 interface User {
-  id: number;
+  id: string;
   name: string;
   email: string;
-  [key: string]: any;
+  department?: string;
+  enrolledCourses?: number;
 }
 
 interface UserManagementProps {
@@ -23,12 +24,12 @@ const UserManagement: React.FC<UserManagementProps> = ({ userType }) => {
   const [users, setUsers] = useState<User[]>(
     userType === 'student' 
       ? [
-          { id: 1, name: 'Jane Doe', email: 'jane@example.com', enrolledCourses: 2 },
-          { id: 2, name: 'John Smith', email: 'john@example.com', enrolledCourses: 1 },
+          { id: '1', name: 'Jane Doe', email: 'jane@example.com', enrolledCourses: 2 },
+          { id: '2', name: 'John Smith', email: 'john@example.com', enrolledCourses: 1 },
         ]
       : [
-          { id: 1, name: 'Dr. Smith', email: 'smith@example.com', department: 'Computer Science' },
-          { id: 2, name: 'Prof. Johnson', email: 'johnson@example.com', department: 'Mathematics' },
+          { id: '1', name: 'Dr. Smith', email: 'smith@example.com', department: 'Computer Science' },
+          { id: '2', name: 'Prof. Johnson', email: 'johnson@example.com', department: 'Mathematics' },
         ]
   );
   
