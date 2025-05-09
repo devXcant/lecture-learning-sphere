@@ -193,23 +193,23 @@ const Auth = () => {
     try {
       setLoading(true);
       
-      // Test accounts data
+      // Test accounts data with real domain patterns
       const testUsers = [
         {
-          email: 'admin@example.com',
+          email: 'admin@learningsphere.edu',
           password: 'password123',
           name: 'Admin Test',
           userType: 'admin',
         },
         {
-          email: 'lecturer@example.com',
+          email: 'lecturer@learningsphere.edu',
           password: 'password123',
           name: 'Lecturer Test',
           userType: 'lecturer',
           department: 'Computer Science'
         },
         {
-          email: 'student@example.com',
+          email: 'student@learningsphere.edu',
           password: 'password123',
           name: 'Student Test',
           userType: 'student',
@@ -245,6 +245,11 @@ const Auth = () => {
         
         if (authError) {
           console.error(`Error creating ${user.userType} test account:`, authError);
+          toast({
+            variant: "destructive",
+            title: `Error creating ${user.userType} test account`,
+            description: authError.message,
+          });
           errorsFound = true;
           continue;
         }
@@ -268,6 +273,11 @@ const Auth = () => {
         
         if (profileError) {
           console.error(`Error creating ${user.userType} profile:`, profileError);
+          toast({
+            variant: "destructive",
+            title: `Error creating ${user.userType} profile`,
+            description: profileError.message,
+          });
           errorsFound = true;
           continue;
         }
@@ -283,10 +293,10 @@ const Auth = () => {
         
         // Pre-fill the form with admin credentials
         signInForm.reset({
-          email: 'admin@example.com',
+          email: 'admin@learningsphere.edu',
           password: 'password123',
         });
-      } else {
+      } else if (!errorsFound) {
         toast({
           variant: "destructive",
           title: "Error",
