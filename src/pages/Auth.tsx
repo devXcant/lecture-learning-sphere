@@ -193,7 +193,7 @@ const Auth = () => {
     try {
       setLoading(true);
       
-      // Test accounts data with real domain patterns
+      // Test accounts data with working email domains
       const testUsers = [
         {
           email: 'admin@learningsphere.edu',
@@ -230,7 +230,7 @@ const Auth = () => {
           console.error("Error during global sign out:", err);
         }
         
-        // Create auth user
+        // Create auth user directly with signUp
         const { data: authData, error: authError } = await supabase.auth.signUp({
           email: user.email,
           password: user.password,
