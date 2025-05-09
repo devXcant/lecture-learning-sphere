@@ -88,11 +88,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const determineUserType = async (userId: string) => {
     try {
       // Check admin table
-      const { data: adminData } = await supabase
+      const { data: adminData, error: adminError } = await supabase
         .from('admin_users')
         .select('id')
         .eq('id', userId)
-        .single();
+        .maybeSingle(); // Use maybeSingle instead of single to avoid errors
       
       if (adminData) {
         const details = await fetchUserDetails(userId, 'admin');
@@ -103,11 +103,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       
       // Check lecturer table
-      const { data: lecturerData } = await supabase
+      const { data: lecturerData, error: lecturerError } = await supabase
         .from('lecturer_users')
         .select('id')
         .eq('id', userId)
-        .single();
+        .maybeSingle(); // Use maybeSingle instead of single
       
       if (lecturerData) {
         const details = await fetchUserDetails(userId, 'lecturer');
@@ -118,11 +118,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       
       // Check student table
-      const { data: studentData } = await supabase
+      const { data: studentData, error: studentError } = await supabase
         .from('student_users')
         .select('id')
         .eq('id', userId)
-        .single();
+        .maybeSingle(); // Use maybeSingle instead of single
       
       if (studentData) {
         const details = await fetchUserDetails(userId, 'student');

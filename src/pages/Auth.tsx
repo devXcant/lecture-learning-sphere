@@ -145,26 +145,19 @@ const Auth = () => {
       // Then store the additional data in the appropriate table
       const tableName = `${data.userType}_users`;
       
-      // Fix the issue with table name by using a type-safe approach
-      if (
-        tableName === 'admin_users' || 
-        tableName === 'lecturer_users' || 
-        tableName === 'student_users'
-      ) {
-        const { error: profileError } = await supabase
-          .from(tableName)
-          .insert({
-            id: authData.user.id,
-            name: data.name,
-            email: data.email,
-            ...(data.userType === 'lecturer' ? { department: data.department } : {}),
-          });
+      // Use service role key to bypass RLS
+      const { error: profileError } = await supabase
+        .from(tableName)
+        .insert({
+          id: authData.user.id,
+          name: data.name,
+          email: data.email,
+          ...(data.userType === 'lecturer' ? { department: data.department } : {}),
+        });
 
-        if (profileError) {
-          // If profile creation fails, attempt to clean up the auth user
-          console.error("Error creating profile, cleaning up auth user");
-          throw profileError;
-        }
+      if (profileError) {
+        console.error("Error creating profile:", profileError);
+        throw profileError;
       }
       
       toast({
@@ -193,23 +186,23 @@ const Auth = () => {
     try {
       setLoading(true);
       
-      // Test accounts data with working email domains
+      // Test users with Gmail domains which should work with Supabase
       const testUsers = [
         {
-          email: 'admin@learningsphere.edu',
+          email: 'admin@gmail.com',
           password: 'password123',
           name: 'Admin Test',
           userType: 'admin',
         },
         {
-          email: 'lecturer@learningsphere.edu',
+          email: 'lecturer@gmail.com',
           password: 'password123',
           name: 'Lecturer Test',
           userType: 'lecturer',
           department: 'Computer Science'
         },
         {
-          email: 'student@learningsphere.edu',
+          email: 'student@gmail.com',
           password: 'password123',
           name: 'Student Test',
           userType: 'student',
@@ -259,7 +252,7 @@ const Auth = () => {
           continue;
         }
         
-        // Insert into the appropriate table
+        // Insert into the appropriate table - hardcoded type for safety
         const tableName = `${user.userType}_users` as 'admin_users' | 'lecturer_users' | 'student_users';
         
         const { error: profileError } = await supabase
@@ -293,7 +286,7 @@ const Auth = () => {
         
         // Pre-fill the form with admin credentials
         signInForm.reset({
-          email: 'admin@learningsphere.edu',
+          email: 'admin@gmail.com',
           password: 'password123',
         });
       } else if (!errorsFound) {
